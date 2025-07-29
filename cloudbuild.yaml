@@ -6,3 +6,6 @@ steps:
       - './code_base' 
       - 'gs://bct-base-adventureworks/scripts/'
       - '--recursive'
+
+options:
+  defaultLogsBucketBehavior: REGIONAL_USER_OWNED_BUCKET
