@@ -1,0 +1,8 @@
+steps:
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    args:
+      - 'storage'
+      - 'cp'
+      - './code_base' 
+      - 'gs://bct-base-adventureworks/scripts/'
+      - '--recursive'
