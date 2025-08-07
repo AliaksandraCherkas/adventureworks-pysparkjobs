@@ -124,7 +124,6 @@ def main():
             col("sod.orderqty").alias("order_quantity"),
             col("sod.unitprice").alias("unit_price"),
             col("sod.unitpricediscount").alias("unit_price_discount"),
-            # Calculate the line_total since it doesn't exist in the source
             (col("sod.orderqty") * col("sod.unitprice")).alias("line_total")
         )
     write_to_bigquery(fact_sales_detail, "fact_sales_detail")

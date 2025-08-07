@@ -1,4 +1,3 @@
-# main_ingest.py
 
 import pyspark.sql
 from pyspark.sql import SparkSession
@@ -154,7 +153,6 @@ def main():
         # so we connect to localhost (127.0.0.1).
         # The proxy securely handles the connection to the actual Cloud SQL instance.
         # jdbc_url = f"jdbc:postgresql://127.0.0.1:5432/{db_name}"
-        # NEW, CORRECTED LINE
         jdbc_url = f"jdbc:postgresql://127.0.0.1:5432/{db_name}?sslmode=disable"
         jdbc_properties = {
             "user": db_user,
