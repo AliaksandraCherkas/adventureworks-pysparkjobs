@@ -21,9 +21,9 @@ logger = logging.getLogger(__name__)
 # --- Configuration from Environment Variables ---
 GCP_PROJECT_ID = os.getenv("GCP_PROJECT_ID")
 GCS_OUTPUT_BUCKET_NAME = os.getenv("GCS_OUTPUT_BUCKET")
-SECRET_DB_USER = "username"
-SECRET_DB_PASS = "password"
-SECRET_DB_NAME = "db_name"
+SECRET_ID_DB_USER = os.getenv("SECRET_ID_DB_USER")
+SECRET_ID_DB_PASS = os.getenv("SECRET_ID_DB_PASS")
+SECRET_ID_DB_NAME = os.getenv("SECRET_ID_DB_NAME")
 
 
 # --- Validate Configuration ---
