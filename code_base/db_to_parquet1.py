@@ -34,8 +34,6 @@ if not GCP_PROJECT_ID:
         logger.error("GCP_PROJECT_ID is not set and could not be determined from the environment.")
         raise
 
-if not all([GCS_OUTPUT_BUCKET_NAME, SECRET_DB_USER, SECRET_DB_PASS, SECRET_DB_NAME]):
-    raise ValueError("One or more required environment variables are not set.")
 
 GCS_OUTPUT_BUCKET = f"gs://{GCS_OUTPUT_BUCKET_NAME}"
 
