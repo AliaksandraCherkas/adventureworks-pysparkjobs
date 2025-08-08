@@ -172,7 +172,7 @@ def main():
         logger.info("Credentials retrieved successfully.")
 
         # JDBC connection details
-        jdbc_url = f"jdbc:postgresql://127.0.0.1:5432/{db_name}?sslmode=disable"
+        jdbc_url = f"jdbc:postgresql://127.0.0.1:5433/{db_name}?sslmode=disable"
         jdbc_properties = {
             "user": db_user,
             "password": db_pass,
