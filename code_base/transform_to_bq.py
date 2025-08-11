@@ -1,8 +1,7 @@
-# transform_to_bq_no_caching.py
+# transform_to_bq_individuals_only.py
 
 from pyspark.sql import SparkSession
-# NOTE: StorageLevel import has been removed.
-from pyspark.sql.functions import col, sum as _sum, to_date, date_format, year, month, dayofweek, dayofmonth
+from pyspark.sql.functions import col, sum as _sum, to_date, date_format, year, month, dayofweek, dayofmonth, concat_ws
 from pyspark.sql.types import (
     StructType, StructField, IntegerType, StringType, DateType,
     DecimalType, LongType, ShortType
@@ -14,14 +13,22 @@ GCS_BUCKET = "bct-base-adventureworks"
 BQ_DATASET = "adventureworks_dw"
 GCS_INPUT_PATH = f"gs://{GCS_BUCKET}/parquet"
 GCS_TEMP_BUCKET = GCS_BUCKET
+
+# <<< FIX 1: Remove 'sales.store' as it's no longer needed.
 SOURCE_TABLES = [
-    "person.person", "sales.customer", "sales.salesterritory", "production.product",
-    "production.productsubcategory", "production.productcategory",
-    "sales.salesorderheader", "sales.salesorderdetail"
+    "person.person",
+    "sales.customer",
+    "sales.salesterritory",
+    "production.product",
+    "production.productsubcategory",
+    "production.productcategory",
+    "sales.salesorderheader",
+    "sales.salesorderdetail",
 ]
 
-# --- BigQuery Table Schemas (Synchronized with source data) ---
+# --- BigQuery Table Schemas ---
 BQ_SCHEMAS = {
+    # <<< FIX 2: Revert to the simpler customer dimension schema.
     "dim_customer": StructType([
         StructField("customer_key", IntegerType(), False),
         StructField("first_name", StringType(), True),
@@ -41,6 +48,7 @@ BQ_SCHEMAS = {
         StructField("country_region_code", StringType(), True),
         StructField("territory_group", StringType(), True)
     ]),
+    # (Other schemas remain the same)
     "dim_date": StructType([
         StructField("date_key", IntegerType(), False),
         StructField("date", DateType(), True),
@@ -69,7 +77,7 @@ BQ_SCHEMAS = {
     ])
 }
 
-# --- Helper Functions ---
+# --- Helper Functions (No changes) ---
 def read_source_tables(spark, gcs_path, tables):
     dfs = {}
     for table_path in tables:
@@ -95,8 +103,11 @@ def main():
     source_dfs = read_source_tables(spark, GCS_INPUT_PATH, SOURCE_TABLES)
 
     # --- Create and Write Dimension Tables ---
+    
+    # <<< FIX 3: Updated logic to filter for individuals only.
     dim_customer = source_dfs["customer"].alias("c") \
-        .join(source_dfs["person"].alias("p"), col("c.personid") == col("p.businessentityid"), "left") \
+        .filter(col("c.personid").isNotNull()) \
+        .join(source_dfs["person"].alias("p"), col("c.personid") == col("p.businessentityid"), "inner") \
         .select(
             col("c.customerid").alias("customer_key"),
             col("p.firstname").alias("first_name"),
@@ -104,6 +115,7 @@ def main():
         )
     write_to_bigquery(dim_customer, "dim_customer", BQ_SCHEMAS["dim_customer"])
 
+    # (The rest of the script remains the same)
     dim_product = source_dfs["product"].alias("p") \
         .join(source_dfs["productsubcategory"].alias("ps"), col("p.productsubcategoryid") == col("ps.productsubcategoryid"), "left") \
         .join(source_dfs["productcategory"].alias("pc"), col("ps.productcategoryid") == col("pc.productcategoryid"), "left") \
@@ -125,7 +137,6 @@ def main():
     )
     write_to_bigquery(dim_territory, "dim_territory", BQ_SCHEMAS["dim_territory"])
 
-    # NOTE: The 'salesorderheader' DataFrame is now processed twice, once here...
     dim_date = source_dfs["salesorderheader"] \
         .select(to_date(col("orderdate")).alias("date")) \
         .distinct() \
@@ -136,8 +147,6 @@ def main():
         )
     write_to_bigquery(dim_date, "dim_date", BQ_SCHEMAS["dim_date"])
 
-    # --- Create and Write Fact Tables ---
-    # NOTE: ...and again here. Without caching, Spark re-reads and re-processes from the source.
     fact_sales_detail = source_dfs["salesorderdetail"].alias("sod") \
         .join(source_dfs["salesorderheader"].alias("soh"), col("sod.salesorderid") == col("soh.salesorderid"), "inner") \
         .select(
@@ -153,10 +162,8 @@ def main():
             (col("sod.orderqty") * col("sod.unitprice")).alias("line_total")
         )
     
-    # NOTE: The `fact_sales_detail` DataFrame will be computed once for this write...
     write_to_bigquery(fact_sales_detail, "fact_sales_detail", BQ_SCHEMAS["fact_sales_detail"])
 
-    # NOTE: ...and computed a second time from scratch for this aggregation.
     fact_sales_agg = fact_sales_detail \
         .groupBy("date_key", "product_key") \
         .agg(
@@ -166,7 +173,6 @@ def main():
 
     write_to_bigquery(fact_sales_agg, "fact_sales_agg_daily_product", BQ_SCHEMAS["fact_sales_agg_daily_product"])
 
-    # NOTE: No .unpersist() calls are needed as nothing was cached.
     spark.stop()
 
 if __name__ == "__main__":
