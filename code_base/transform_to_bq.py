@@ -1,13 +1,14 @@
-# transform_to_bq_persist_only.py
+# transform_to_bq_no_caching.py
 
-from pyspark.sql import SparkSession, StorageLevel
+from pyspark.sql import SparkSession
+# NOTE: StorageLevel import has been removed.
 from pyspark.sql.functions import col, sum as _sum, to_date, date_format, year, month, dayofweek, dayofmonth
 from pyspark.sql.types import (
     StructType, StructField, IntegerType, StringType, DateType,
     DecimalType, LongType, ShortType
 )
 
-# --- Configuration (No changes) ---
+# --- Configuration ---
 GCP_PROJECT_ID = "adventureworks-project-466602"
 GCS_BUCKET = "bct-base-adventureworks"
 BQ_DATASET = "adventureworks_dw"
@@ -18,6 +19,8 @@ SOURCE_TABLES = [
     "production.productsubcategory", "production.productcategory",
     "sales.salesorderheader", "sales.salesorderdetail"
 ]
+
+# --- BigQuery Table Schemas (Synchronized with source data) ---
 BQ_SCHEMAS = {
     "dim_customer": StructType([
         StructField("customer_key", IntegerType(), False),
@@ -29,8 +32,8 @@ BQ_SCHEMAS = {
         StructField("product_name", StringType(), True),
         StructField("subcategory_name", StringType(), True),
         StructField("category_name", StringType(), True),
-        StructField("standard_cost", DecimalType(19, 4), True),
-        StructField("list_price", DecimalType(19, 4), True)
+        StructField("standard_cost", DecimalType(38, 18), True),
+        StructField("list_price", DecimalType(38, 18), True)
     ]),
     "dim_territory": StructType([
         StructField("territory_key", IntegerType(), False),
@@ -54,9 +57,9 @@ BQ_SCHEMAS = {
         StructField("product_key", IntegerType(), False),
         StructField("territory_key", IntegerType(), True),
         StructField("order_quantity", ShortType(), True),
-        StructField("unit_price", DecimalType(19, 4), True),
-        StructField("unit_price_discount", DecimalType(19, 4), True),
-        StructField("line_total", DecimalType(38, 6), True)
+        StructField("unit_price", DecimalType(38, 18), True),
+        StructField("unit_price_discount", DecimalType(38, 18), True),
+        StructField("line_total", DecimalType(38, 6), True) 
     ]),
     "fact_sales_agg_daily_product": StructType([
         StructField("date_key", IntegerType(), False),
@@ -66,7 +69,7 @@ BQ_SCHEMAS = {
     ])
 }
 
-# --- Helper Functions (No changes) ---
+# --- Helper Functions ---
 def read_source_tables(spark, gcs_path, tables):
     dfs = {}
     for table_path in tables:
@@ -86,14 +89,12 @@ def write_to_bigquery(df, table_name, schema):
 # --- Main ETL Logic ---
 def main():
     spark = SparkSession.builder \
-        .appName("AdventureWorks_Transformation_PersistOnly") \
+        .appName("AdventureWorks_Transformation_to_BQ") \
         .getOrCreate()
         
     source_dfs = read_source_tables(spark, GCS_INPUT_PATH, SOURCE_TABLES)
 
     # --- Create and Write Dimension Tables ---
-    
-    # dim_customer
     dim_customer = source_dfs["customer"].alias("c") \
         .join(source_dfs["person"].alias("p"), col("c.personid") == col("p.businessentityid"), "left") \
         .select(
@@ -103,7 +104,6 @@ def main():
         )
     write_to_bigquery(dim_customer, "dim_customer", BQ_SCHEMAS["dim_customer"])
 
-    # dim_product
     dim_product = source_dfs["product"].alias("p") \
         .join(source_dfs["productsubcategory"].alias("ps"), col("p.productsubcategoryid") == col("ps.productsubcategoryid"), "left") \
         .join(source_dfs["productcategory"].alias("pc"), col("ps.productcategoryid") == col("pc.productcategoryid"), "left") \
@@ -117,7 +117,6 @@ def main():
         )
     write_to_bigquery(dim_product, "dim_product", BQ_SCHEMAS["dim_product"])
     
-    # dim_territory
     dim_territory = source_dfs["salesterritory"].select(
         col("territoryid").alias("territory_key"),
         col("name").alias("territory_name"),
@@ -126,11 +125,8 @@ def main():
     )
     write_to_bigquery(dim_territory, "dim_territory", BQ_SCHEMAS["dim_territory"])
 
-    # OPTIMIZATION: Cache salesorderheader as it's used for dim_date and fact_sales_detail
-    sales_order_header_df = source_dfs["salesorderheader"].persist(StorageLevel.MEMORY_AND_DISK)
-
-    # dim_date (reads from cached DataFrame)
-    dim_date = sales_order_header_df \
+    # NOTE: The 'salesorderheader' DataFrame is now processed twice, once here...
+    dim_date = source_dfs["salesorderheader"] \
         .select(to_date(col("orderdate")).alias("date")) \
         .distinct() \
         .select(
@@ -141,10 +137,9 @@ def main():
     write_to_bigquery(dim_date, "dim_date", BQ_SCHEMAS["dim_date"])
 
     # --- Create and Write Fact Tables ---
-    
-    # fact_sales_detail (reads from cached sales_order_header_df)
+    # NOTE: ...and again here. Without caching, Spark re-reads and re-processes from the source.
     fact_sales_detail = source_dfs["salesorderdetail"].alias("sod") \
-        .join(sales_order_header_df.alias("soh"), col("sod.salesorderid") == col("soh.salesorderid"), "inner") \
+        .join(source_dfs["salesorderheader"].alias("soh"), col("sod.salesorderid") == col("soh.salesorderid"), "inner") \
         .select(
             col("soh.salesorderid").alias("sales_order_id"),
             col("sod.salesorderdetailid").alias("sales_order_detail_id"),
@@ -158,13 +153,10 @@ def main():
             (col("sod.orderqty") * col("sod.unitprice")).alias("line_total")
         )
     
-    # OPTIMIZATION: Persist the detailed fact table as it's written AND used for aggregation.
-    fact_sales_detail.persist(StorageLevel.MEMORY_AND_DISK)
-    
-    # Action 1: Write the detailed fact table. This triggers the computation and caching.
+    # NOTE: The `fact_sales_detail` DataFrame will be computed once for this write...
     write_to_bigquery(fact_sales_detail, "fact_sales_detail", BQ_SCHEMAS["fact_sales_detail"])
 
-    # fact_sales_agg_daily_product (reads from cached fact_sales_detail)
+    # NOTE: ...and computed a second time from scratch for this aggregation.
     fact_sales_agg = fact_sales_detail \
         .groupBy("date_key", "product_key") \
         .agg(
@@ -172,13 +164,9 @@ def main():
             _sum("line_total").alias("total_revenue")
         )
 
-    # Action 2: Write the aggregated fact table.
     write_to_bigquery(fact_sales_agg, "fact_sales_agg_daily_product", BQ_SCHEMAS["fact_sales_agg_daily_product"])
 
-    # OPTIMIZATION: Clean up cached data from memory/disk once done.
-    sales_order_header_df.unpersist()
-    fact_sales_detail.unpersist()
-
+    # NOTE: No .unpersist() calls are needed as nothing was cached.
     spark.stop()
 
 if __name__ == "__main__":
