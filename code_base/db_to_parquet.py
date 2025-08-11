@@ -14,13 +14,13 @@ SECRET_DB_USER = "username"
 SECRET_DB_PASS = "password"
 SECRET_DB_NAME = "db_name"
 
-# Added productcategory and productsubcategory for more detailed product analysis.
+
 TABLES_TO_INGEST = [
     ("sales", "salesorderheader"),
     ("sales", "salesorderdetail"),
     ("production", "product"),
-    ("production", "productsubcategory"), # <-- Added
-    ("production", "productcategory"),    # <-- Added for completeness
+    ("production", "productsubcategory"), 
+    ("production", "productcategory"),    
     ("sales", "customer"),
     ("person", "person"),
     ("sales", "salesterritory"),
@@ -28,7 +28,6 @@ TABLES_TO_INGEST = [
 
 # --- Explicit Schema Definitions ---
 TABLE_SCHEMAS = {
-    # ... (sales, person schemas remain the same)
     "sales.salesorderheader": StructType([
         StructField("salesorderid", IntegerType(), False),
         StructField("revisionnumber", ByteType(), False),
@@ -37,7 +36,6 @@ TABLE_SCHEMAS = {
         StructField("shipdate", TimestampType(), True),
         StructField("status", ByteType(), False),
         StructField("onlineorderflag", BooleanType(), False),
-        StructField("salesordernumber", StringType(), False),
         StructField("purchaseordernumber", StringType(), True),
         StructField("accountnumber", StringType(), True),
         StructField("customerid", IntegerType(), False),
@@ -66,7 +64,6 @@ TABLE_SCHEMAS = {
         StructField("specialofferid", IntegerType(), False),
         StructField("unitprice", DecimalType(19, 4), False),
         StructField("unitpricediscount", DecimalType(19, 4), False),
-        StructField("linetotal", DecimalType(38, 6), False),
         StructField("rowguid", StringType(), False),
         StructField("modifieddate", TimestampType(), False),
     ]),
@@ -75,7 +72,6 @@ TABLE_SCHEMAS = {
         StructField("personid", IntegerType(), True),
         StructField("storeid", IntegerType(), True),
         StructField("territoryid", IntegerType(), True),
-        StructField("accountnumber", StringType(), False),
         StructField("rowguid", StringType(), False),
         StructField("modifieddate", TimestampType(), False),
     ]),
@@ -136,7 +132,6 @@ TABLE_SCHEMAS = {
         StructField("modifieddate", TimestampType(), False),
     ]),
     
-    # Schema for the newly added tables
     "production.productsubcategory": StructType([
         StructField("productsubcategoryid", IntegerType(), False),
         StructField("productcategoryid", IntegerType(), False),
@@ -186,7 +181,7 @@ def ingest_table(
 # --- Main Execution Logic ---
 def main():
     """Main function to orchestrate the ETL process."""
-    time.sleep(20)
+    time.sleep(10)
     try:
         _, project_id = google.auth.default()
         if not project_id:
