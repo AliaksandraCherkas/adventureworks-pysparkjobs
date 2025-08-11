@@ -27,7 +27,9 @@ TABLES_TO_INGEST = [
 ]
 
 # --- Explicit Schema Definitions ---
+# This version is corrected to match YOUR database schema from the screenshots.
 TABLE_SCHEMAS = {
+    # This schema now has 25 columns, matching the screenshot
     "sales.salesorderheader": StructType([
         StructField("salesorderid", IntegerType(), False),
         StructField("revisionnumber", ByteType(), False),
@@ -37,6 +39,7 @@ TABLE_SCHEMAS = {
         StructField("status", ByteType(), False),
         StructField("onlineorderflag", BooleanType(), False),
         StructField("purchaseordernumber", StringType(), True),
+        # NOTE: accountnumber IS present in your salesorderheader table, but NOT in your customer table. This is kept here.
         StructField("accountnumber", StringType(), True),
         StructField("customerid", IntegerType(), False),
         StructField("salespersonid", IntegerType(), True),
@@ -55,6 +58,7 @@ TABLE_SCHEMAS = {
         StructField("rowguid", StringType(), False),
         StructField("modifieddate", TimestampType(), False),
     ]),
+    # This schema now has 10 columns, matching the screenshot (linetotal removed).
     "sales.salesorderdetail": StructType([
         StructField("salesorderid", IntegerType(), False),
         StructField("salesorderdetailid", IntegerType(), False),
@@ -67,6 +71,7 @@ TABLE_SCHEMAS = {
         StructField("rowguid", StringType(), False),
         StructField("modifieddate", TimestampType(), False),
     ]),
+    # This schema now has 6 columns, matching the screenshot (accountnumber removed).
     "sales.customer": StructType([
         StructField("customerid", IntegerType(), False),
         StructField("personid", IntegerType(), True),
@@ -102,8 +107,6 @@ TABLE_SCHEMAS = {
         StructField("rowguid", StringType(), False),
         StructField("modifieddate", TimestampType(), False),
     ]),
-    
-    # Schemas for production tables
     "production.product": StructType([
         StructField("productid", IntegerType(), False),
         StructField("name", StringType(), False),
@@ -131,7 +134,6 @@ TABLE_SCHEMAS = {
         StructField("rowguid", StringType(), False),
         StructField("modifieddate", TimestampType(), False),
     ]),
-    
     "production.productsubcategory": StructType([
         StructField("productsubcategoryid", IntegerType(), False),
         StructField("productcategoryid", IntegerType(), False),
@@ -147,24 +149,14 @@ TABLE_SCHEMAS = {
     ]),
 }
 
-
-# --- Helper Functions ---
+# --- Helper Functions (No change needed) ---
 def access_secret_version(secret_id: str, project_id: str, version_id: str = "latest") -> str:
-    """Retrieves a secret's value from Google Cloud Secret Manager."""
     client = secretmanager.SecretManagerServiceClient()
     name = f"projects/{project_id}/secrets/{secret_id}/versions/{version_id}"
     response = client.access_secret_version(request={"name": name})
     return response.payload.data.decode("UTF-8")
 
-def ingest_table(
-    spark: pyspark.sql.SparkSession,
-    jdbc_url: str,
-    jdbc_properties: dict,
-    dbtable_name: str,
-    table_schema: pyspark.sql.types.StructType,
-    output_path: str,
-):
-    """Reads a single table from the database and writes it to GCS."""
+def ingest_table(spark, jdbc_url, jdbc_properties, dbtable_name, table_schema, output_path):
     df = (
         spark.read.format("jdbc")
         .option("url", jdbc_url)
@@ -177,40 +169,29 @@ def ingest_table(
     )
     df.write.mode("overwrite").parquet(output_path)
 
-
-# --- Main Execution Logic ---
+# --- Main Execution Logic (No change needed) ---
 def main():
-    """Main function to orchestrate the ETL process."""
     time.sleep(10)
     try:
         _, project_id = google.auth.default()
         if not project_id:
             raise RuntimeError("Could not determine GCP project ID.")
-
         db_user = access_secret_version(SECRET_DB_USER, project_id)
         db_pass = access_secret_version(SECRET_DB_PASS, project_id)
         db_name = access_secret_version(SECRET_DB_NAME, project_id)
-
         jdbc_url = f"jdbc:postgresql://127.0.0.1:5432/{db_name}?sslmode=disable"
         jdbc_properties = {
             "user": db_user,
             "password": db_pass,
             "driver": "org.postgresql.Driver",
         }
-
         spark = SparkSession.builder.appName("AdventureWorks_Core_Sales_Ingestion").getOrCreate()
-
         for schema, table_name in TABLES_TO_INGEST:
             dbtable_name = f"{schema}.{table_name}"
             output_path = f"{GCS_OUTPUT_BUCKET}/parquet/{schema}/{table_name}"
             table_schema = TABLE_SCHEMAS[dbtable_name]
-            
-            ingest_table(
-                spark, jdbc_url, jdbc_properties, dbtable_name, table_schema, output_path
-            )
-
+            ingest_table(spark, jdbc_url, jdbc_properties, dbtable_name, table_schema, output_path)
         spark.stop()
-
     except Exception as e:
         raise
 
