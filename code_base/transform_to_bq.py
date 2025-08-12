@@ -1,4 +1,3 @@
-# transform_to_bq_individuals_only.py
 
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, sum as _sum, to_date, date_format, year, month, dayofweek, dayofmonth, concat_ws
@@ -14,7 +13,6 @@ BQ_DATASET = "adventureworks_dw"
 GCS_INPUT_PATH = f"gs://{GCS_BUCKET}/parquet"
 GCS_TEMP_BUCKET = GCS_BUCKET
 
-# <<< FIX 1: Remove 'sales.store' as it's no longer needed.
 SOURCE_TABLES = [
     "person.person",
     "sales.customer",
@@ -28,7 +26,6 @@ SOURCE_TABLES = [
 
 # --- BigQuery Table Schemas ---
 BQ_SCHEMAS = {
-    # <<< FIX 2: Revert to the simpler customer dimension schema.
     "dim_customer": StructType([
         StructField("customer_key", IntegerType(), False),
         StructField("first_name", StringType(), True),
@@ -48,7 +45,6 @@ BQ_SCHEMAS = {
         StructField("country_region_code", StringType(), True),
         StructField("territory_group", StringType(), True)
     ]),
-    # (Other schemas remain the same)
     "dim_date": StructType([
         StructField("date_key", IntegerType(), False),
         StructField("date", DateType(), True),
@@ -77,7 +73,7 @@ BQ_SCHEMAS = {
     ])
 }
 
-# --- Helper Functions (No changes) ---
+# --- Helper Functions  ---
 def read_source_tables(spark, gcs_path, tables):
     dfs = {}
     for table_path in tables:
@@ -103,8 +99,6 @@ def main():
     source_dfs = read_source_tables(spark, GCS_INPUT_PATH, SOURCE_TABLES)
 
     # --- Create and Write Dimension Tables ---
-    
-    # <<< FIX 3: Updated logic to filter for individuals only.
     dim_customer = source_dfs["customer"].alias("c") \
         .filter(col("c.personid").isNotNull()) \
         .join(source_dfs["person"].alias("p"), col("c.personid") == col("p.businessentityid"), "inner") \
@@ -115,10 +109,9 @@ def main():
         )
     write_to_bigquery(dim_customer, "dim_customer", BQ_SCHEMAS["dim_customer"])
 
-    # (The rest of the script remains the same)
     dim_product = source_dfs["product"].alias("p") \
-        .join(source_dfs["productsubcategory"].alias("ps"), col("p.productsubcategoryid") == col("ps.productsubcategoryid"), "left") \
-        .join(source_dfs["productcategory"].alias("pc"), col("ps.productcategoryid") == col("pc.productcategoryid"), "left") \
+        .join(source_dfs["productsubcategory"].alias("ps"), col("p.productsubcategoryid") == col("ps.productsubcategoryid"), "inner") \
+        .join(source_dfs["productcategory"].alias("pc"), col("ps.productcategoryid") == col("pc.productcategoryid"), "inner") \
         .select(
             col("p.productid").alias("product_key"),
             col("p.name").alias("product_name"),

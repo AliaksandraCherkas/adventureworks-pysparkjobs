@@ -2,7 +2,7 @@ import pyspark.sql
 from pyspark.sql import SparkSession
 from pyspark.sql.types import (
     StructType, StructField, IntegerType, StringType, TimestampType,
-    BooleanType, DecimalType, ShortType, ByteType
+    BooleanType, DecimalType, ShortType
 )
 from google.cloud import secretmanager
 import google.auth
@@ -13,7 +13,6 @@ GCS_OUTPUT_BUCKET = "gs://bct-base-adventureworks"
 SECRET_DB_USER = "username"
 SECRET_DB_PASS = "password"
 SECRET_DB_NAME = "db_name"
-
 
 TABLES_TO_INGEST = [
     ("sales", "salesorderheader"),
@@ -27,18 +26,13 @@ TABLES_TO_INGEST = [
 ]
 
 # --- Explicit Schema Definitions ---
-# This version is corrected based on the Dataproc error log.
 TABLE_SCHEMAS = {
     "sales.salesorderheader": StructType([
-        # NOTE: All columns are now nullable (True) to match the actual schema from the DB.
-        # This is the safest approach as NOT NULL constraints are not always propagated.
         StructField("salesorderid", IntegerType(), True),
-        # FIX 1: revisionnumber is SMALLINT -> ShortType
         StructField("revisionnumber", ShortType(), True),
         StructField("orderdate", TimestampType(), True),
         StructField("duedate", TimestampType(), True),
         StructField("shipdate", TimestampType(), True),
-        # FIX 2: status is SMALLINT -> ShortType
         StructField("status", ShortType(), True),
         StructField("onlineorderflag", BooleanType(), True),
         StructField("purchaseordernumber", StringType(), True),
@@ -52,7 +46,6 @@ TABLE_SCHEMAS = {
         StructField("creditcardid", IntegerType(), True),
         StructField("creditcardapprovalcode", StringType(), True),
         StructField("currencyrateid", IntegerType(), True),
-        # FIX 3: All decimal types updated to match the actual precision (38, 18)
         StructField("subtotal", DecimalType(38, 18), True),
         StructField("taxamt", DecimalType(38, 18), True),
         StructField("freight", DecimalType(38, 18), True),
@@ -61,7 +54,6 @@ TABLE_SCHEMAS = {
         StructField("rowguid", StringType(), True),
         StructField("modifieddate", TimestampType(), True),
     ]),
-    # Assuming similar corrections are needed for other tables, making them all nullable for safety.
     "sales.salesorderdetail": StructType([
         StructField("salesorderid", IntegerType(), True),
         StructField("salesorderdetailid", IntegerType(), True),
@@ -151,15 +143,16 @@ TABLE_SCHEMAS = {
     ]),
 }
 
-# --- Helper Functions (No change) ---
-# ... (rest of your script is fine) ...
-def access_secret_version(secret_id: str, project_id: str, version_id: str = "latest") -> str:
+# --- Helper Functions ---
+def access_secret_version(secret_id: str, project_id: str) -> str:
+    """Retrieves a secret's value from Google Cloud Secret Manager."""
     client = secretmanager.SecretManagerServiceClient()
-    name = f"projects/{project_id}/secrets/{secret_id}/versions/{version_id}"
+    name = f"projects/{project_id}/secrets/{secret_id}/versions/latest"
     response = client.access_secret_version(request={"name": name})
     return response.payload.data.decode("UTF-8")
 
 def ingest_table(spark, jdbc_url, jdbc_properties, dbtable_name, table_schema, output_path):
+    """Reads a single table via JDBC and writes it to GCS as Parquet."""
     df = (
         spark.read.format("jdbc")
         .option("url", jdbc_url)
@@ -172,30 +165,42 @@ def ingest_table(spark, jdbc_url, jdbc_properties, dbtable_name, table_schema, o
     )
     df.write.mode("overwrite").parquet(output_path)
 
+# --- Main Execution Logic ---
 def main():
+    """Main function to orchestrate the ETL process."""
+    # A short delay can be helpful in containerized environments for services to initialize.
     time.sleep(10)
-    try:
-        _, project_id = google.auth.default()
-        if not project_id:
-            raise RuntimeError("Could not determine GCP project ID.")
-        db_user = access_secret_version(SECRET_DB_USER, project_id)
-        db_pass = access_secret_version(SECRET_DB_PASS, project_id)
-        db_name = access_secret_version(SECRET_DB_NAME, project_id)
-        jdbc_url = f"jdbc:postgresql://127.0.0.1:5432/{db_name}?sslmode=disable"
-        jdbc_properties = {
-            "user": db_user,
-            "password": db_pass,
-            "driver": "org.postgresql.Driver",
-        }
-        spark = SparkSession.builder.appName("AdventureWorks_Core_Sales_Ingestion").getOrCreate()
-        for schema, table_name in TABLES_TO_INGEST:
-            dbtable_name = f"{schema}.{table_name}"
-            output_path = f"{GCS_OUTPUT_BUCKET}/parquet/{schema}/{table_name}"
-            table_schema = TABLE_SCHEMAS[dbtable_name]
-            ingest_table(spark, jdbc_url, jdbc_properties, dbtable_name, table_schema, output_path)
-        spark.stop()
-    except Exception as e:
-        raise
+    
+    # Set up configurations
+    _, project_id = google.auth.default()
+    if not project_id:
+        raise RuntimeError("Could not automatically determine GCP project ID.")
+        
+    db_user = access_secret_version(SECRET_DB_USER, project_id)
+    db_pass = access_secret_version(SECRET_DB_PASS, project_id)
+    db_name = access_secret_version(SECRET_DB_NAME, project_id)
+    
+    jdbc_url = f"jdbc:postgresql://127.0.0.1:5432/{db_name}?sslmode=disable"
+    jdbc_properties = {
+        "user": db_user,
+        "password": db_pass,
+        "driver": "org.postgresql.Driver",
+    }
+    
+    # Initialize Spark
+    spark = SparkSession.builder.appName("AdventureWorks_Core_Sales_Ingestion").getOrCreate()
+    
+    # Loop through tables and ingest
+    for schema, table_name in TABLES_TO_INGEST:
+        dbtable_name = f"{schema}.{table_name}"
+        output_path = f"{GCS_OUTPUT_BUCKET}/parquet/{schema}/{table_name}"
+        table_schema = TABLE_SCHEMAS[dbtable_name]
+        
+        ingest_table(spark, jdbc_url, jdbc_properties, dbtable_name, table_schema, output_path)
+        
+    # Stop Spark session
+    spark.stop()
 
+# --- Script Entrypoint ---
 if __name__ == "__main__":
     main()
